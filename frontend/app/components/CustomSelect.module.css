@@ -1,0 +1,220 @@
+/* ========================================
+   CUSTOM SELECT COMPONENT
+   ========================================
+   
+   Color Variables:
+   - Base background matches trigger
+   - Selected: slightly lighter (+6-10%)
+   - Hover: slightly darker (-6-10%)
+   
+   Width Matching:
+   - Container is position:relative with width:100%
+   - Menu is position:absolute with width:100%
+   - This ensures menu matches trigger width exactly
+   
+   No White Strip:
+   - Menu has margin:0, padding:0
+   - Options have no margin
+   - Background covers entire menu area
+   
+   ======================================== */
+
+/* CSS Variables for easy theming */
+.selectContainer {
+  --select-bg: #1a1a2e;
+  --select-bg-hover: #252540;
+  --select-bg-selected: #2e2e4a;
+  --select-menu-bg: #1a1a2e;
+  --select-border: rgba(255, 255, 255, 0.08);
+  --select-border-focus: #667eea;
+  --select-text: #ffffff;
+  --select-text-muted: rgba(255, 255, 255, 0.6);
+  --select-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --select-radius: 8px;
+  --select-transition: 150ms ease;
+  
+  position: relative;
+  width: 100%;
+}
+
+/* ========================================
+   TRIGGER BUTTON
+   ======================================== */
+
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.875rem 1rem;
+  background: var(--select-bg);
+  border: 1px solid var(--select-border);
+  border-radius: var(--select-radius);
+  color: var(--select-text);
+  font-size: 0.95rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--select-transition);
+}
+
+.trigger:hover {
+  background: var(--select-bg-hover);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.trigger:focus {
+  outline: none;
+  border-color: var(--select-border-focus);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--select-border-focus);
+  outline-offset: 2px;
+}
+
+.triggerOpen {
+  border-color: var(--select-border-focus);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.triggerDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.triggerText {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Arrow Icon */
+.arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.5rem;
+  color: var(--select-text-muted);
+  transition: transform var(--select-transition);
+}
+
+.arrowOpen {
+  transform: rotate(180deg);
+}
+
+/* ========================================
+   DROPDOWN MENU
+   ======================================== */
+
+.menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  width: 100%; /* (a) Ensures menu matches trigger width exactly */
+  margin: 0; /* (d) No white strip - remove default margins */
+  padding: 0; /* (d) No white strip - remove default padding */
+  list-style: none;
+  background: var(--select-menu-bg);
+  border: 1px solid var(--select-border-focus);
+  border-top: none;
+  border-bottom-left-radius: var(--select-radius);
+  border-bottom-right-radius: var(--select-radius);
+  box-shadow: var(--select-shadow);
+  z-index: 1000;
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  
+  /* Hide scrollbar by default, show only when needed */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.menu::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ========================================
+   OPTION ITEMS
+   ======================================== */
+
+.option {
+  display: flex;
+  align-items: center;
+  width: 100%; /* Matches parent width */
+  padding: 0.875rem 1rem; /* Same padding as trigger */
+  margin: 0; /* (d) No gaps/white strips */
+  background: var(--select-menu-bg);
+  color: var(--select-text);
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color var(--select-transition);
+  box-sizing: border-box;
+}
+
+/* (c) Hover: lighter background - noticeable */
+.option:hover,
+.optionFocused {
+  background: var(--select-bg-hover);
+}
+
+/* (b) Selected: lightest background */
+.optionSelected {
+  background: var(--select-bg-selected);
+}
+
+/* Selected + Hover: keep it highlighted */
+.optionSelected:hover,
+.optionSelected.optionFocused {
+  background: var(--select-bg-selected);
+}
+
+/* Focus-visible for keyboard navigation */
+.option:focus {
+  outline: none;
+}
+
+.option:focus-visible {
+  outline: 2px solid var(--select-border-focus);
+  outline-offset: -2px;
+}
+
+/* Last option - ensure rounded corners */
+.option:last-child {
+  border-bottom-left-radius: calc(var(--select-radius) - 1px);
+  border-bottom-right-radius: calc(var(--select-radius) - 1px);
+}
+
+/* ========================================
+   RESPONSIVE
+   ======================================== */
+
+@media (max-width: 768px) {
+  .trigger {
+    padding: 0.75rem 0.875rem;
+    font-size: 0.9rem;
+  }
+  
+  .option {
+    padding: 0.75rem 0.875rem;
+    font-size: 0.9rem;
+  }
+}
