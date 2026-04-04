@@ -13,11 +13,42 @@ from app.schemas import MessageCreate, ChatResponse, MessageResponse, ChatWithMe
 from app.auth import get_current_user
 from app.graph import create_agent_graph
 from app.llm_provider import llm_provider
+from app.learning_intelligence import learning_intelligence
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 # Initialize agent graph
 agent_graph = create_agent_graph()
+
+
+def _extract_text_content(content: object) -> str:
+    """Normalize LangChain content payloads into plain text."""
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+            elif isinstance(block, dict) and "text" in block:
+                text_parts.append(str(block["text"]))
+        return "\n".join([t for t in text_parts if t])
+    return str(content) if content else ""
+
+
+def _append_learning_support(user_text: str, answer: str) -> str:
+    """Attach sentiment + recommendation guidance to response text."""
+    try:
+        support_block = learning_intelligence.build_support_block(user_text)
+        return (answer.strip() + support_block).strip()
+    except Exception:
+        # Do not block chat replies if ML helper has transient issues.
+        return answer
+
+
+def _safe_error_message(exc: Exception) -> str:
+    raw = str(exc).strip()
+    if not raw:
+        return "Something went wrong while processing your message. Please try again."
+    return raw
 
 
 def set_user_api_keys(
@@ -65,20 +96,8 @@ async def send_message_public(
         
         # Extract answer from last message
         final_message = result["messages"][-1]
-        content = final_message.content
-        
-        # Ensure content is a string (LangChain can return list of content blocks)
-        if isinstance(content, list):
-            # Extract text from content blocks
-            text_parts = []
-            for block in content:
-                if isinstance(block, str):
-                    text_parts.append(block)
-                elif isinstance(block, dict) and 'text' in block:
-                    text_parts.append(block['text'])
-            answer = '\n'.join(text_parts) if text_parts else str(content)
-        else:
-            answer = str(content) if content else ""
+        answer = _extract_text_content(final_message.content)
+        answer = _append_learning_support(message_data.message, answer)
         
         return {
             "success": True,
@@ -89,7 +108,7 @@ async def send_message_public(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Error processing message: {str(e)}"
+            detail=f"Error processing message: {_safe_error_message(e)}"
         )
 
 
@@ -102,6 +121,25 @@ async def send_message_prompt_public(
     """Alias to the public message endpoint for compatibility with older frontends."""
     # Delegate to the public handler
     return await send_message_public(message_data, session)
+
+
+@router.get("/ml/metrics")
+async def get_ml_metrics(
+    current_user: dict = Depends(get_current_user),
+):
+    """Return sentiment training/evaluation metrics for demos and viva."""
+    return learning_intelligence.get_metrics()
+
+
+@router.get("/ml/dataset-sources")
+async def get_ml_dataset_sources(
+    current_user: dict = Depends(get_current_user),
+):
+    """Return recommended dataset links and target file paths."""
+    return {
+        "download_and_keep_in": "backend/data/ml/",
+        "sources": learning_intelligence.get_dataset_sources(),
+    }
 
 
 @router.get("/", response_model=list[ChatResponse])
@@ -169,20 +207,8 @@ async def send_message(
         
         # Extract answer from last message
         final_message = result["messages"][-1]
-        content = final_message.content
-        
-        # Ensure content is a string (LangChain can return list of content blocks)
-        if isinstance(content, list):
-            # Extract text from content blocks
-            text_parts = []
-            for block in content:
-                if isinstance(block, str):
-                    text_parts.append(block)
-                elif isinstance(block, dict) and 'text' in block:
-                    text_parts.append(block['text'])
-            answer = '\n'.join(text_parts) if text_parts else str(content)
-        else:
-            answer = str(content) if content else ""
+        answer = _extract_text_content(final_message.content)
+        answer = _append_learning_support(message_data.message, answer)
         
         # Save message to database
         new_message = Message(
@@ -203,7 +229,7 @@ async def send_message(
         await session.rollback()
         raise HTTPException(
             status_code=500,
-            detail=f"Error processing message: {str(e)}"
+            detail=f"Error processing message: {_safe_error_message(e)}"
         )
 
 
@@ -244,6 +270,7 @@ async def send_message_stream(
     async def stream_response():
         """Generator for streaming responses."""
         accumulated_answer = ""
+        final_candidate = ""
         
         try:
             # Stream from agent graph
@@ -276,6 +303,34 @@ async def send_message_stream(
                 elif kind == "on_tool_start":
                     tool_name = event["name"]
                     yield f"data: {json.dumps({'type': 'status', 'data': f'Searching {tool_name}...'})}\n\n"
+
+                # Capture non-token final outputs (important when response is generated without token streaming)
+                elif kind == "on_chain_end":
+                    output_payload = event.get("data", {}).get("output")
+                    if isinstance(output_payload, dict) and "messages" in output_payload:
+                        output_messages = output_payload.get("messages") or []
+                        if output_messages:
+                            last_output = output_messages[-1]
+                            content = _extract_text_content(getattr(last_output, "content", ""))
+                            if content:
+                                final_candidate = content
+
+            if not accumulated_answer and final_candidate:
+                accumulated_answer = final_candidate
+                yield f"data: {json.dumps({'type': 'content', 'data': final_candidate})}\n\n"
+
+            if not accumulated_answer:
+                accumulated_answer = (
+                    "I could not find this information in the backend knowledge base. "
+                    "Please rephrase your question or ask about available university data."
+                )
+                yield f"data: {json.dumps({'type': 'content', 'data': accumulated_answer})}\n\n"
+
+            accumulated_answer = _append_learning_support(message_data.message, accumulated_answer)
+            if accumulated_answer and accumulated_answer != final_candidate:
+                support_only = accumulated_answer[len(final_candidate):] if accumulated_answer.startswith(final_candidate) else ""
+                if support_only:
+                    yield f"data: {json.dumps({'type': 'content', 'data': support_only})}\n\n"
                 
             # Send completion event
             yield f"data: {json.dumps({'type': 'complete', 'chat_id': chat_id})}\n\n"
@@ -290,7 +345,7 @@ async def send_message_stream(
             await session.commit()
             
         except Exception as e:
-            error_msg = f"Error: {str(e)}"
+            error_msg = _safe_error_message(e)
             yield f"data: {json.dumps({'type': 'error', 'data': error_msg})}\n\n"
     
     return StreamingResponse(

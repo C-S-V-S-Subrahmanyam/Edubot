@@ -262,6 +262,216 @@ class ApiClient {
       method: 'DELETE',
     });
   }
+
+  async getMlMetrics(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('/chat/ml/metrics');
+  }
+
+  async getMlDatasetSources(): Promise<{ download_and_keep_in: string; sources: Array<Record<string, string>> }> {
+    return this.request<{ download_and_keep_in: string; sources: Array<Record<string, string>> }>('/chat/ml/dataset-sources');
+  }
+
+  async submitFeedback(data: {
+    chat_id?: string | null;
+    feedback_type: 'positive' | 'negative';
+    user_message: string;
+    bot_message: string;
+    reason?: string;
+  }): Promise<{ id: string; feedback_type: string; status: string }> {
+    return this.request<{ id: string; feedback_type: string; status: string }>('/feedback/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getFeedbackStats(): Promise<{
+    total_feedback: number;
+    positive_feedback: number;
+    negative_feedback: number;
+    pending_feedback: number;
+    in_review_feedback: number;
+    resolved_feedback: number;
+    dismissed_feedback: number;
+  }> {
+    return this.request('/feedback/stats');
+  }
+
+  async getFeedbackTaxonomy(): Promise<{
+    reasons: Record<'positive' | 'negative', string[]>;
+    statuses: string[];
+    transitions: Record<string, string[]>;
+  }> {
+    return this.request('/feedback/taxonomy');
+  }
+
+  async getFeedbackList(limit = 50, offset = 0): Promise<Array<{
+    id: string;
+    feedback_type: 'positive' | 'negative';
+    user_message: string;
+    bot_message: string;
+    reason?: string;
+    status: string;
+    created_at: string;
+  }>> {
+    return this.request(`/feedback/?limit=${limit}&offset=${offset}`);
+  }
+
+  async updateFeedbackStatus(
+    feedbackId: string,
+    status: 'pending' | 'triaged' | 'in_review' | 'actioned' | 'resolved' | 'reviewed' | 'dismissed',
+  ): Promise<{ id: string; status: string }> {
+    return this.request(`/feedback/${feedbackId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  async createGoldenExampleFromFeedback(
+    feedbackId: string,
+    goldenResponse: string,
+  ): Promise<{ id: string; source_type: string; golden_response: string }> {
+    return this.request(`/feedback/${feedbackId}/golden-example`, {
+      method: 'POST',
+      body: JSON.stringify({ golden_response: goldenResponse }),
+    });
+  }
+
+  async getGoldenExamples(limit = 50, offset = 0): Promise<Array<{
+    id: string;
+    source_type: string;
+    original_query: string;
+    original_response: string;
+    golden_response: string;
+    is_active: boolean;
+    created_at: string;
+  }>> {
+    return this.request(`/feedback/golden-examples?limit=${limit}&offset=${offset}`);
+  }
+
+  async updateGoldenExample(
+    goldenId: string,
+    isActive: boolean,
+  ): Promise<{ id: string; is_active: boolean }> {
+    return this.request(`/feedback/golden-examples/${goldenId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_active: isActive }),
+    });
+  }
+
+  async deleteGoldenExample(goldenId: string): Promise<{ success: boolean; message: string }> {
+    return this.request(`/feedback/golden-examples/${goldenId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getIntegrations(limit = 50, offset = 0): Promise<Array<{
+    id: string;
+    service_name: string;
+    auth_type: string;
+    config: Record<string, unknown>;
+    is_active: boolean;
+    last_sync_status?: string;
+    last_sync_error?: string;
+    last_synced_at?: string;
+    created_at: string;
+  }>> {
+    return this.request(`/integrations/?limit=${limit}&offset=${offset}`);
+  }
+
+  async createIntegration(data: {
+    service_name: string;
+    auth_type: string;
+    config: Record<string, unknown>;
+    is_active?: boolean;
+  }): Promise<{ id: string; service_name: string }> {
+    return this.request('/integrations/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateIntegration(
+    integrationId: string,
+    data: Partial<{
+      service_name: string;
+      auth_type: string;
+      config: Record<string, unknown>;
+      is_active: boolean;
+    }>,
+  ): Promise<{ id: string; is_active: boolean }> {
+    return this.request(`/integrations/${integrationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteIntegration(integrationId: string): Promise<{ success: boolean; message: string }> {
+    return this.request(`/integrations/${integrationId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async testIntegrationConnection(baseUrl: string): Promise<{ success: boolean; status_code?: number; message: string; details?: string }> {
+    return this.request('/integrations/test-connection', {
+      method: 'POST',
+      body: JSON.stringify({ base_url: baseUrl }),
+    });
+  }
+
+  async runIntegrationSync(integrationId: string): Promise<{
+    success: boolean;
+    log: {
+      id: string;
+      status: string;
+      http_status?: number;
+      message?: string;
+      started_at: string;
+      finished_at?: string;
+    };
+  }> {
+    return this.request(`/integrations/${integrationId}/sync`, {
+      method: 'POST',
+    });
+  }
+
+  async getIntegrationSyncHistory(integrationId: string, limit = 20, offset = 0): Promise<Array<{
+    id: string;
+    integration_id: string;
+    status: string;
+    http_status?: number;
+    message?: string;
+    started_at: string;
+    finished_at?: string;
+    triggered_by?: string;
+    created_at: string;
+  }>> {
+    return this.request(`/integrations/${integrationId}/sync-history?limit=${limit}&offset=${offset}`);
+  }
+
+  async getPermissionCatalog(): Promise<{ permissions: string[] }> {
+    return this.request('/settings/permissions/catalog');
+  }
+
+  async getUsersForPermissions(limit = 100, offset = 0): Promise<Array<{
+    id: string;
+    email: string;
+    username: string;
+    is_admin: boolean;
+    permissions: string[];
+    created_at: string;
+  }>> {
+    return this.request(`/settings/users?limit=${limit}&offset=${offset}`);
+  }
+
+  async updateUserPermissions(userId: string, permissions: string[]): Promise<{
+    id: string;
+    permissions: string[];
+  }> {
+    return this.request(`/settings/users/${userId}/permissions`, {
+      method: 'PATCH',
+      body: JSON.stringify({ permissions }),
+    });
+  }
 }
 
 export const apiClient = new ApiClient();

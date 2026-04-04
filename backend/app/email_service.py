@@ -300,32 +300,32 @@ def get_welcome_email_template(username: str, email: str) -> str:
 
 
 def send_email(to_email: str, subject: str, html_content: str) -> bool:
-    """Send an email using SMTP."""
-    try:
-        email_user = os.getenv("EMAIL_USER")
-        email_pass = os.getenv("EMAIL_PASS")
-        
-        if not email_user or not email_pass:
-            print("Email credentials not configured")
-            return False
-        
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = f"EduBot+ <{email_user}>"
-        msg['To'] = to_email
-        
-        html_part = MIMEText(html_content, 'html')
-        msg.attach(html_part)
-        
-        # Connect to Gmail SMTP
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(email_user, email_pass)
-            server.sendmail(email_user, to_email, msg.as_string())
-        
-        return True
-    except Exception as e:
-        print(f"Error sending email: {e}")
-        return False
+  """Send an email using SMTP."""
+  try:
+    email_user = os.getenv("EMAIL_USER") or os.getenv("EMAIL_ADDRESS")
+    email_pass = os.getenv("EMAIL_PASS") or os.getenv("EMAIL_PASSWORD")
+
+    if not email_user or not email_pass:
+      print("Email credentials not configured")
+      return False
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = f"EduBot+ <{email_user}>"
+    msg['To'] = to_email
+
+    html_part = MIMEText(html_content, 'html')
+    msg.attach(html_part)
+
+    # Connect to Gmail SMTP
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+      server.login(email_user, email_pass)
+      server.sendmail(email_user, to_email, msg.as_string())
+
+    return True
+  except Exception as e:
+    print(f"Error sending email: {e}")
+    return False
 
 
 def store_otp(email: str, otp: str, username: str, hashed_password: str) -> None:

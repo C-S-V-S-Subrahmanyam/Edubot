@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
 
@@ -22,6 +22,7 @@ class UserResponse(BaseModel):
     username: str
     is_active: bool
     is_admin: bool
+    permissions: List[str] = []
     created_at: datetime
     
     @field_validator('id', mode='before')
@@ -284,3 +285,178 @@ class ScraperUrlAdd(BaseModel):
 class ScraperUrlRemove(BaseModel):
     """Request to remove a single URL."""
     url: str
+
+
+# Feedback Schemas
+class FeedbackCreate(BaseModel):
+    chat_id: Optional[str] = None
+    feedback_type: str = Field(..., pattern="^(positive|negative)$")
+    user_message: str = Field(..., min_length=1, max_length=5000)
+    bot_message: str = Field(..., min_length=1, max_length=20000)
+    reason: Optional[str] = Field(None, max_length=2000)
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    chat_id: Optional[str] = None
+    user_id: Optional[str] = None
+    feedback_type: str
+    reason: Optional[str] = None
+    user_message: str
+    bot_message: str
+    status: str
+    created_at: datetime
+
+    @field_validator('id', 'chat_id', 'user_id', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
+    class Config:
+        from_attributes = True
+
+
+class FeedbackStatsResponse(BaseModel):
+    total_feedback: int
+    positive_feedback: int
+    negative_feedback: int
+    pending_feedback: int
+    in_review_feedback: int = 0
+    resolved_feedback: int = 0
+    dismissed_feedback: int = 0
+
+
+class FeedbackStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(pending|triaged|in_review|actioned|resolved|reviewed|dismissed)$")
+
+
+class FeedbackTaxonomyResponse(BaseModel):
+    reasons: Dict[str, List[str]]
+    statuses: List[str]
+    transitions: Dict[str, List[str]]
+
+
+class GoldenExampleCreate(BaseModel):
+    golden_response: str = Field(..., min_length=1, max_length=20000)
+
+
+class GoldenExampleResponse(BaseModel):
+    id: str
+    feedback_id: Optional[str] = None
+    source_type: str
+    original_query: str
+    original_response: str
+    golden_response: str
+    created_by: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('id', 'feedback_id', 'created_by', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
+    class Config:
+        from_attributes = True
+
+
+class GoldenExampleUpdate(BaseModel):
+    is_active: bool
+
+
+# Integrations Schemas
+class IntegrationCreate(BaseModel):
+    service_name: str = Field(..., min_length=2, max_length=100)
+    auth_type: str = Field(..., min_length=2, max_length=50)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+
+
+class IntegrationUpdate(BaseModel):
+    service_name: Optional[str] = Field(None, min_length=2, max_length=100)
+    auth_type: Optional[str] = Field(None, min_length=2, max_length=50)
+    config: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+class IntegrationResponse(BaseModel):
+    id: str
+    service_name: str
+    auth_type: str
+    config: Dict[str, Any]
+    is_active: bool
+    last_sync_status: Optional[str] = None
+    last_sync_error: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator('id', 'created_by', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
+    class Config:
+        from_attributes = True
+
+
+class IntegrationTestRequest(BaseModel):
+    base_url: str = Field(..., min_length=8)
+
+
+class IntegrationSyncLogResponse(BaseModel):
+    id: str
+    integration_id: str
+    status: str
+    http_status: Optional[int] = None
+    message: Optional[str] = None
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    triggered_by: Optional[str] = None
+    created_at: datetime
+
+    @field_validator('id', 'integration_id', 'triggered_by', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
+    class Config:
+        from_attributes = True
+
+
+class IntegrationSyncRunResponse(BaseModel):
+    success: bool
+    log: IntegrationSyncLogResponse
+
+
+class UserPermissionResponse(BaseModel):
+    id: str
+    email: str
+    username: str
+    is_admin: bool
+    permissions: List[str] = []
+    created_at: datetime
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
+    class Config:
+        from_attributes = True
+
+
+class UserPermissionUpdate(BaseModel):
+    permissions: List[str] = Field(default_factory=list)

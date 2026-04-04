@@ -13,7 +13,16 @@ interface Message {
   content: string;
   status?: string;   // tool-use status (e.g. "Searching...")
   streaming?: boolean; // true while still receiving tokens
+  feedbackSent?: boolean;
 }
+
+type FeedbackType = 'positive' | 'negative';
+
+type FeedbackDraft = {
+  assistantIndex: number;
+  feedbackType: FeedbackType;
+  reason: string;
+};
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -25,6 +34,11 @@ export default function ChatPage() {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [chatsLoading, setChatsLoading] = useState(false);
+  const [feedbackReasonCatalog, setFeedbackReasonCatalog] = useState<Record<FeedbackType, string[]>>({
+    positive: [],
+    negative: [],
+  });
+  const [feedbackDraft, setFeedbackDraft] = useState<FeedbackDraft | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const { user, logout } = useAuth();
@@ -43,15 +57,34 @@ export default function ChatPage() {
       const chatList = await apiClient.getChats();
       setChats(chatList);
     } catch (err) {
-      console.error('Failed to load chats:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('401') || message.includes('403')) {
+        logout();
+        return;
+      }
+      console.warn('Failed to load chats:', message);
+      setChats([]);
     } finally {
       setChatsLoading(false);
     }
-  }, [user]);
+  }, [user, logout]);
 
   useEffect(() => {
     loadChats();
   }, [loadChats]);
+
+  useEffect(() => {
+    if (!user) return;
+    const loadFeedbackTaxonomy = async () => {
+      try {
+        const taxonomy = await apiClient.getFeedbackTaxonomy();
+        setFeedbackReasonCatalog(taxonomy.reasons);
+      } catch {
+        // Non-blocking; feedback can still be sent without reason selection.
+      }
+    };
+    loadFeedbackTaxonomy();
+  }, [user]);
 
   // Focus edit input when editing
   useEffect(() => {
@@ -96,6 +129,47 @@ export default function ChatPage() {
 
   const handleSettings = () => {
     router.push('/settings');
+  };
+
+  const handleFeedbackSelection = (assistantIndex: number, feedbackType: FeedbackType) => {
+    const defaultReasons = feedbackReasonCatalog[feedbackType] || [];
+    setFeedbackDraft({
+      assistantIndex,
+      feedbackType,
+      reason: defaultReasons[0] || '',
+    });
+  };
+
+  const submitFeedbackDraft = async () => {
+    if (!feedbackDraft || !user || !chatId) return;
+
+    const assistantIndex = feedbackDraft.assistantIndex;
+    if (!user || !chatId) return;
+    if (assistantIndex <= 0 || messages[assistantIndex].role !== 'assistant') return;
+
+    const userMessage = messages[assistantIndex - 1];
+    const assistantMessage = messages[assistantIndex];
+    if (userMessage.role !== 'user') return;
+
+    try {
+      await apiClient.submitFeedback({
+        chat_id: chatId,
+        feedback_type: feedbackDraft.feedbackType,
+        user_message: userMessage.content,
+        bot_message: assistantMessage.content,
+        reason: feedbackDraft.reason || undefined,
+      });
+
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[assistantIndex] = { ...updated[assistantIndex], feedbackSent: true };
+        return updated;
+      });
+      setFeedbackDraft(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('Failed to submit feedback:', message);
+    }
   };
 
   const handleRename = async (targetChatId: string) => {
@@ -191,10 +265,12 @@ export default function ChatPage() {
               setMessages(prev => {
                 const updated = [...prev];
                 const last = updated[updated.length - 1];
+                const cleaned = (errMsg || '').trim();
+                const displayError = cleaned || 'Something went wrong while processing your message. Please try again.';
                 if (last.role === 'assistant') {
                   updated[updated.length - 1] = {
                     ...last,
-                    content: last.content || `Error: ${errMsg}`,
+                    content: last.content || displayError,
                     streaming: false,
                     status: undefined,
                   };
@@ -226,11 +302,12 @@ export default function ChatPage() {
             ]);
           }
         } catch (fallbackErr) {
+          const errText = fallbackErr instanceof Error ? fallbackErr.message : 'Failed to send message';
           setMessages(prev => [
             ...prev,
             {
               role: 'assistant',
-              content: `Error: ${fallbackErr instanceof Error ? fallbackErr.message : 'Failed to send message'}`,
+              content: errText,
             },
           ]);
         }
@@ -257,11 +334,12 @@ export default function ChatPage() {
           ]);
         }
       } catch (err) {
+        const errText = err instanceof Error ? err.message : 'Failed to send message';
         setMessages(prev => [
           ...prev,
           {
             role: 'assistant',
-            content: `Error: ${err instanceof Error ? err.message : 'Failed to send message'}`,
+            content: errText,
           },
         ]);
       } finally {
@@ -426,6 +504,61 @@ export default function ChatPage() {
                       )}
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                       {msg.streaming && <span className={styles.streamCursor}>▊</span>}
+                      {user && !msg.streaming && msg.content && (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleFeedbackSelection(idx, 'positive')}
+                            disabled={!!msg.feedbackSent}
+                            className={styles.chatActionBtn}
+                            title="Helpful"
+                          >
+                            👍
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleFeedbackSelection(idx, 'negative')}
+                            disabled={!!msg.feedbackSent}
+                            className={styles.chatActionBtn}
+                            title="Not helpful"
+                          >
+                            👎
+                          </button>
+                        </div>
+                      )}
+                      {feedbackDraft && feedbackDraft.assistantIndex === idx && (
+                        <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                          <label style={{ fontSize: 12, opacity: 0.85 }}>
+                            Feedback reason
+                          </label>
+                          <select
+                            value={feedbackDraft.reason}
+                            onChange={(e) => setFeedbackDraft({ ...feedbackDraft, reason: e.target.value })}
+                            style={{
+                              borderRadius: 10,
+                              padding: '8px 10px',
+                              border: '1px solid rgba(255,255,255,0.25)',
+                              background: 'rgba(255,255,255,0.08)',
+                              color: '#fff',
+                            }}
+                          >
+                            {(feedbackReasonCatalog[feedbackDraft.feedbackType] || []).map((reason) => (
+                              <option key={reason} value={reason}>
+                                {reason}
+                              </option>
+                            ))}
+                            <option value="Other: Custom feedback">Other: Custom feedback</option>
+                          </select>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button type="button" className={styles.uploadButton} onClick={submitFeedbackDraft}>
+                              Submit feedback
+                            </button>
+                            <button type="button" className={styles.removeButton} onClick={() => setFeedbackDraft(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </>
                   ) : (
                     msg.content

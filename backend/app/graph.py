@@ -12,8 +12,10 @@ This module creates the LangGraph workflow where:
 
 from typing import Annotated, Sequence, TypedDict, Optional, Literal
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack
+import atexit
 
-from langchain_core.messages import BaseMessage, SystemMessage, AIMessage, HumanMessage
+from langchain_core.messages import BaseMessage, SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
@@ -29,6 +31,11 @@ from app.query_router import (
     Domain,
 )
 from app.vector_store import search_documents
+from app.golden_examples import get_relevant_golden_examples, format_golden_examples_for_prompt
+
+
+_checkpointer_exit_stack = ExitStack()
+atexit.register(_checkpointer_exit_stack.close)
 
 
 # ── Multi-hop result aggregation ──────────────────────────────────────
@@ -38,6 +45,43 @@ _DOMAIN_TO_CATEGORY: dict[Domain, str] = {
     Domain.ADMINISTRATIVE: "Administrative",
     Domain.EDUCATIONAL: "Educational",
 }
+
+NO_BACKEND_DATA_MESSAGE = (
+    "I could not find this information in the backend knowledge base. "
+    "Please rephrase your question or ask about available university data."
+)
+
+BACKEND_ONLY_ENFORCEMENT_MESSAGE = (
+    "I can only answer using backend knowledge-base data. "
+    "Please use a tool-capable model/provider and try again."
+)
+
+
+def _tool_messages_since_last_human(messages: Sequence[BaseMessage]) -> list[ToolMessage]:
+    """Return tool messages emitted after the latest human message in the thread."""
+    last_human_idx = -1
+    for idx, msg in enumerate(messages):
+        if isinstance(msg, HumanMessage) or getattr(msg, "type", None) == "human":
+            last_human_idx = idx
+
+    if last_human_idx < 0:
+        return []
+
+    recent = messages[last_human_idx + 1:]
+    return [
+        m for m in recent
+        if isinstance(m, ToolMessage) or getattr(m, "type", None) == "tool"
+    ]
+
+
+def _tool_content_has_relevant_data(content: str) -> bool:
+    lower = content.lower()
+    no_data_markers = [
+        "no relevant",
+        "related data is not present",
+        "not present in the system",
+    ]
+    return not any(marker in lower for marker in no_data_markers)
 
 
 def _aggregate_multi_hop_results(
@@ -215,9 +259,29 @@ def agent_node(state: AgentState) -> AgentState:
             "context when it already answers the question.\n"
         )
 
+    # ── Golden examples context (best-effort) ───────────────────
+    golden_prompt_block = ""
+    if latest_query:
+        golden_examples = get_relevant_golden_examples(latest_query, limit=3)
+        if golden_examples:
+            print(f"Injecting {len(golden_examples)} golden example(s) into prompt")
+            golden_prompt_block = "\n\n" + format_golden_examples_for_prompt(golden_examples) + "\n"
+
     # Check if model supports tools
+    current_provider = llm_provider.get_current_provider()
+    available_providers = llm_provider.get_available_providers()
+    print(f"---AGENT_NODE DEBUG--- Provider: {current_provider}, Available: {available_providers}")
+    
     if llm_provider.supports_tools():
         print("Using LLM with tool support")
+
+        recent_tool_messages = _tool_messages_since_last_human(state["messages"])
+        has_recent_tool_results = len(recent_tool_messages) > 0
+        has_relevant_tool_results = any(
+            _tool_content_has_relevant_data(str(getattr(m, "content", "")))
+            for m in recent_tool_messages
+        )
+        has_only_empty_tool_results = has_recent_tool_results and not has_relevant_tool_results
         
         # Domain-aware routing: classify query and select relevant tools
         domain_tools = get_domain_tools_for_query(latest_query)
@@ -231,15 +295,18 @@ def agent_node(state: AgentState) -> AgentState:
         
         llm_with_tools = llm.bind_tools(domain_tools)
         
-        system_message = SystemMessage(content=f"""You are a helpful university chatbot assistant with access to local university information files.
+        system_message = SystemMessage(content=f"""You are a strict university backend assistant.
+    You must answer ONLY from backend knowledge-base evidence (retrieved context or tool results).
+    Never use general world knowledge when backend evidence is missing.
 
 {routing_context}
 {multi_hop_prompt_block}
+    {golden_prompt_block}
 HOW TO RESPOND:
 1. For ANY question, ALWAYS use the appropriate tool first to search the university knowledge base
 2. If the tools return relevant information, answer BASED ON that information and CITE THE SOURCE (see citation rules below)
-3. If the tools return "The related data is not present" or no relevant information is found, you MAY still answer the question using your general knowledge, BUT you MUST clearly add a disclaimer like:
-   "⚠️ *Note: This answer is based on general knowledge and was not retrieved from the university knowledge base.*"
+    3. If tools/context do not contain relevant information, respond with this exact sentence:
+       "I could not find this information in the backend knowledge base. Please rephrase your question or ask about available university data."
 4. For multi-domain questions, synthesize information from ALL relevant domains into a single coherent answer
 5. **Be concise and direct.** Answer the specific question the user asked without unnecessary elaboration or filler. Get to the point quickly.
 6. Use bullet points or numbered lists for multiple items instead of long paragraphs.
@@ -261,7 +328,8 @@ You MUST follow these citation rules when knowledge-base results are used:
    - 📄 `another_file.txt` (Category)
 
    List ONLY the files you actually referenced. Do NOT list files that were returned but not used.
-3. If the answer is based entirely on general knowledge (no tool results used), do NOT add a Sources section.
+3. If there is no backend evidence, do NOT invent or infer from general knowledge.
+4. If there is no backend evidence, return the exact fallback sentence provided above and do NOT add a Sources section.
 4. Never expose raw relevance scores to the user.
 --- END CITATION RULES ---
 
@@ -283,31 +351,60 @@ Tool selection guide:
 - Questions about dates, holidays, deadlines → use search_academic_calendar or check_if_date_is_holiday
 - Questions about contact info → use get_university_contact_info
 - Questions about courses, materials, programming, subjects → use search_educational_resources
-- General questions → use search_educational_resources first, then answer with general knowledge if not found
+- General questions → use search_educational_resources first
 - Multi-domain questions (e.g. "refund policy if I drop a course") → use tools from ALL relevant domains
 
-IMPORTANT: Always search the knowledge base first. Only fall back to general knowledge if the tools find nothing. Always be transparent about the source of your answer.""")
+IMPORTANT: Always search the knowledge base first. Do NOT answer from memory or general knowledge. If no relevant backend evidence exists, return the exact fallback sentence.""")
         
         messages = [system_message] + list(state["messages"])
-        response = llm_with_tools.invoke(messages)
+        
+        try:
+            response = llm_with_tools.invoke(messages)
+        except Exception as e:
+            # Handle quota/rate limit errors by trying the next tool-capable provider.
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ["quota", "rate_limit", "429", "insufficient_quota"]):
+                print("⚠ Primary provider quota exhausted, trying fallback providers...")
+                original_provider = llm_provider.get_current_provider()
+                fallback_order = ["gemini", "deepseek", "ollama"]
+
+                response = None
+                for fallback_provider in fallback_order:
+                    if fallback_provider == original_provider:
+                        continue
+                    if fallback_provider == "ollama" and not llm_provider.supports_tools_for("ollama"):
+                        print("- Skipping Ollama fallback because the configured model does not support tools")
+                        continue
+                    if not available_providers.get(fallback_provider, False):
+                        print(f"- Skipping {fallback_provider} fallback because it is not available")
+                        continue
+
+                    try:
+                        print(f"- Trying fallback provider: {fallback_provider}")
+                        fallback_llm = llm_provider.get_llm(provider=fallback_provider).bind_tools(domain_tools)
+                        response = fallback_llm.invoke(messages)
+                        print(f"✓ Fallback to {fallback_provider} succeeded")
+                        break
+                    except Exception as fallback_error:
+                        print(f"✗ Fallback {fallback_provider} failed: {fallback_error}")
+
+                if response is None:
+                    print(f"Restoring original provider: {original_provider}")
+                    llm_provider.set_provider(original_provider)
+                    return {"messages": [AIMessage(content=NO_BACKEND_DATA_MESSAGE)]}
+            else:
+                raise
+
+        # Hard guardrails: never allow non-grounded direct answers.
+        if has_only_empty_tool_results:
+            return {"messages": [AIMessage(content=NO_BACKEND_DATA_MESSAGE)]}
+
+        if (not has_recent_tool_results) and (not multi_hop_ctx):
+            if not (hasattr(response, "tool_calls") and response.tool_calls):
+                return {"messages": [AIMessage(content=NO_BACKEND_DATA_MESSAGE)]}
     else:
         print("Using LLM WITHOUT tool support - direct responses only")
-        
-        system_message = SystemMessage(content="""You are a helpful university chatbot assistant.
-
-Provide clear, concise, and helpful responses to user questions. Be direct — answer the specific question without unnecessary elaboration. Use bullet points for lists. Keep responses focused, typically 3-8 sentences unless the question genuinely requires more detail.
-
-Answer to the best of your knowledge about university-related topics including:
-- Academic programs and courses
-- Tuition and fees
-- Academic calendars and deadlines
-- University policies and procedures
-- General educational topics
-
-Be friendly, informative, and professional. If you don't know something specific to this university, say so honestly.""")
-        
-        messages = [system_message] + list(state["messages"])
-        response = llm.invoke(messages)
+        return {"messages": [AIMessage(content=BACKEND_ONLY_ENFORCEMENT_MESSAGE)]}
     
     return {"messages": [response]}
 
@@ -319,6 +416,9 @@ def should_continue(state: AgentState) -> Literal["tools", "end"]:
     last_message = state["messages"][-1]
     
     # Check if model supports tools first
+    provider = llm_provider.get_current_provider()
+    print(f"[SHOULD_CONTINUE] Current provider: {provider}, Tool support: {llm_provider.supports_tools()}")
+    
     if not llm_provider.supports_tools():
         print("NO: Model doesn't support tools, ending")
         return "end"
@@ -348,9 +448,16 @@ def create_agent_graph():
     
     # Initialize PostgreSQL checkpointer for persistent conversation memory
     try:
-        checkpointer = PostgresSaver.from_conn_string(DATABASE_URL_SYNC)
-        checkpointer.setup()  # Creates checkpoint tables if they don't exist
-        print("PostgreSQL checkpointer initialized - conversation history will persist across restarts")
+        checkpointer_cm = PostgresSaver.from_conn_string(DATABASE_URL_SYNC)
+        checkpointer = _checkpointer_exit_stack.enter_context(checkpointer_cm)
+        # Current PostgresSaver implementation in this environment does not implement
+        # async checkpoint methods required by astream/ainvoke paths.
+        if checkpointer.__class__.aget_tuple.__qualname__.startswith("BaseCheckpointSaver"):
+            print("PostgreSQL checkpointer is sync-only; disabling for async chat paths")
+            checkpointer = None
+        else:
+            checkpointer.setup()  # Creates checkpoint tables if they don't exist
+            print("PostgreSQL checkpointer initialized - conversation history will persist across restarts")
     except Exception as e:
         print(f"Warning: Could not initialize PostgreSQL checkpointer: {e}")
         print("Falling back to no checkpointer - conversation history will not persist")

@@ -12,6 +12,7 @@ and stored with category metadata for domain-aware retrieval.
 import uuid
 import numpy as np
 from typing import List, Optional
+import time
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -35,6 +36,7 @@ CHUNK_SIZE = 800     # ~800 characters per chunk
 CHUNK_OVERLAP = 80   # ~10% overlap
 SIMILARITY_THRESHOLD = 0.20
 TOP_K = 5
+QDRANT_TIMEOUT_SECONDS = 30
 
 
 # ── Singleton Instances ───────────────────────────────────────
@@ -57,7 +59,11 @@ def get_qdrant_client() -> QdrantClient:
     global _qdrant_client
     if _qdrant_client is None:
         print(f"Connecting to Qdrant at {QDRANT_URL}")
-        _qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        _qdrant_client = QdrantClient(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
+            timeout=QDRANT_TIMEOUT_SECONDS,
+        )
         print("Qdrant client connected")
     return _qdrant_client
 
@@ -66,7 +72,23 @@ def get_qdrant_client() -> QdrantClient:
 def ensure_collection():
     """Create the Qdrant collection if it doesn't exist."""
     client = get_qdrant_client()
-    collections = [c.name for c in client.get_collections().collections]
+
+    # Cloud calls can be transiently slow; retry a few times before failing startup init.
+    last_error = None
+    collections = None
+    for attempt in range(1, 4):
+        try:
+            collections = [c.name for c in client.get_collections().collections]
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt < 3:
+                print(f"Qdrant get_collections failed (attempt {attempt}/3): {exc}")
+                time.sleep(1.5 * attempt)
+
+    if collections is None:
+        raise RuntimeError(f"Unable to query Qdrant collections after retries: {last_error}")
+
     if COLLECTION_NAME not in collections:
         print(f"Creating collection: {COLLECTION_NAME}")
         client.create_collection(

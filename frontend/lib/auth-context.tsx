@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from './api';
 
 interface AuthContextType {
-  user: { email: string; username: string; is_admin: boolean } | null;
+  user: { email: string; username: string; is_admin: boolean; permissions?: string[] } | null;
   login: (email: string, password: string) => Promise<void>;
-  loginWithToken: (token: string, user: { email: string; username: string; is_admin: boolean }) => void;
+  loginWithToken: (token: string, user: { email: string; username: string; is_admin: boolean; permissions?: string[] }) => void;
   logout: () => void;
   loading: boolean;
 }
@@ -15,7 +15,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<{ email: string; username: string; is_admin: boolean } | null>(null);
+  const [user, setUser] = useState<{ email: string; username: string; is_admin: boolean; permissions?: string[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -42,7 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const userData = { 
       email: response.user.email, 
       username: response.user.username,
-      is_admin: response.user.is_admin 
+      is_admin: response.user.is_admin,
+      permissions: response.user.permissions || [],
     };
     localStorage.setItem('user', JSON.stringify(userData));
     setUser(userData);
@@ -57,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     router.push('/chat');
   };
 
-  const loginWithToken = (token: string, userData: { email: string; username: string; is_admin: boolean }) => {
+  const loginWithToken = (token: string, userData: { email: string; username: string; is_admin: boolean; permissions?: string[] }) => {
     apiClient.setToken(token);
     localStorage.setItem('user', JSON.stringify(userData));
     setUser(userData);

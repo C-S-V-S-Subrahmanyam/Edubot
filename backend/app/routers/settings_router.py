@@ -2,18 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 import httpx
+import uuid
 from typing import Optional
 from pathlib import Path
 from datetime import datetime, timezone
 
 from app.db.database import get_session
-from app.db.models import Setting, Document
+from app.db.models import Setting, Document, User
 from app.schemas import (
     ProviderUpdate, ProviderResponse, SettingsResponse, SettingsUpdate,
     TestConnectionRequest, DocumentResponse, DocumentListResponse,
     DocumentExpiryUpdate,
     ScraperPageResult, ScraperRunResponse, ScraperConfigResponse,
     ScraperConfigUpdate, ScraperUrlAdd, ScraperUrlRemove,
+    UserPermissionResponse, UserPermissionUpdate,
 )
 from app.auth import get_current_user, get_current_admin_user
 from app.llm_provider import llm_provider
@@ -24,6 +26,10 @@ from app.config import (
 from app.document_parser import extract_text
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
+AVAILABLE_PERMISSIONS = [
+    "feedback.manage",
+    "integration.manage",
+]
 
 
 @router.post("/test-connection")
@@ -300,6 +306,66 @@ async def update_settings(
     await session.refresh(settings)
     
     return SettingsResponse.model_validate(settings)
+
+
+@router.get("/permissions/catalog")
+async def get_permissions_catalog(
+    current_user: dict = Depends(get_current_admin_user),
+):
+    """Return assignable permission keys for RBAC-lite management."""
+    return {"permissions": AVAILABLE_PERMISSIONS}
+
+
+@router.get("/users", response_model=list[UserPermissionResponse])
+async def list_users_for_permissions(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_admin_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """List users for admin permission management."""
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    result = await session.execute(
+        select(User)
+        .order_by(User.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    users = result.scalars().all()
+    return [UserPermissionResponse.model_validate(u) for u in users]
+
+
+@router.patch("/users/{user_id}/permissions", response_model=UserPermissionResponse)
+async def update_user_permissions(
+    user_id: str,
+    body: UserPermissionUpdate,
+    current_user: dict = Depends(get_current_admin_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Replace a target user's permission list (admin only)."""
+    try:
+        parsed_user_id = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+
+    invalid = [perm for perm in body.permissions if perm not in AVAILABLE_PERMISSIONS]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid permissions: {', '.join(invalid)}",
+        )
+
+    result = await session.execute(select(User).where(User.id == parsed_user_id))
+    target_user = result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    target_user.permissions = sorted(list(set(body.permissions)))
+    await session.commit()
+    await session.refresh(target_user)
+    return UserPermissionResponse.model_validate(target_user)
 
 
 @router.post("/upload")
