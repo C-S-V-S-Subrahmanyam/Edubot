@@ -13,6 +13,7 @@ interface Message {
   content: string;
   status?: string;   // tool-use status (e.g. "Searching...")
   streaming?: boolean; // true while still receiving tokens
+  feedbackSent?: boolean;
 }
 
 export default function ChatPage() {
@@ -43,11 +44,17 @@ export default function ChatPage() {
       const chatList = await apiClient.getChats();
       setChats(chatList);
     } catch (err) {
-      console.error('Failed to load chats:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('401') || message.includes('403')) {
+        logout();
+        return;
+      }
+      console.warn('Failed to load chats:', message);
+      setChats([]);
     } finally {
       setChatsLoading(false);
     }
-  }, [user]);
+  }, [user, logout]);
 
   useEffect(() => {
     loadChats();
@@ -96,6 +103,33 @@ export default function ChatPage() {
 
   const handleSettings = () => {
     router.push('/settings');
+  };
+
+  const handleFeedback = async (assistantIndex: number, feedbackType: 'positive' | 'negative') => {
+    if (!user || !chatId) return;
+    if (assistantIndex <= 0 || messages[assistantIndex].role !== 'assistant') return;
+
+    const userMessage = messages[assistantIndex - 1];
+    const assistantMessage = messages[assistantIndex];
+    if (userMessage.role !== 'user') return;
+
+    try {
+      await apiClient.submitFeedback({
+        chat_id: chatId,
+        feedback_type: feedbackType,
+        user_message: userMessage.content,
+        bot_message: assistantMessage.content,
+      });
+
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[assistantIndex] = { ...updated[assistantIndex], feedbackSent: true };
+        return updated;
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn('Failed to submit feedback:', message);
+    }
   };
 
   const handleRename = async (targetChatId: string) => {
@@ -426,6 +460,28 @@ export default function ChatPage() {
                       )}
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                       {msg.streaming && <span className={styles.streamCursor}>▊</span>}
+                      {user && !msg.streaming && msg.content && (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleFeedback(idx, 'positive')}
+                            disabled={!!msg.feedbackSent}
+                            className={styles.chatActionBtn}
+                            title="Helpful"
+                          >
+                            👍
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleFeedback(idx, 'negative')}
+                            disabled={!!msg.feedbackSent}
+                            className={styles.chatActionBtn}
+                            title="Not helpful"
+                          >
+                            👎
+                          </button>
+                        </div>
+                      )}
                     </>
                   ) : (
                     msg.content

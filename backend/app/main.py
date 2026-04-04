@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from app.config import CORS_ORIGINS, DEBUG
 from app.db.database import init_db, AsyncSessionLocal, engine
 from app.db.models import Document
-from app.routers import auth_router, chat_router, settings_router
+from app.routers import auth_router, chat_router, settings_router, feedback_router, integrations_router
 
 from sqlalchemy import select, text
 
@@ -134,6 +134,8 @@ app.add_middleware(
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(chat_router.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
+app.include_router(feedback_router.router, prefix="/api")
+app.include_router(integrations_router.router, prefix="/api")
 
 
 @app.get("/")

@@ -99,6 +99,20 @@
 - Qdrant Cloud account (or self-hosted Qdrant)
 - Ollama *(optional — for local AI)*
 
+### Optional — Start Local Infra with Docker
+
+```bash
+# From project root
+docker compose up -d
+docker compose ps
+```
+
+This starts:
+- PostgreSQL at `localhost:5432`
+- Qdrant at `localhost:6333`
+
+For local Docker-backed setup, copy `backend/.env.docker.example` to `backend/.env`.
+
 ### 1 — Clone & install
 
 ```bash
@@ -133,8 +147,8 @@ QDRANT_URL=https://your-cluster.cloud.qdrant.io:6333
 QDRANT_API_KEY=your-qdrant-api-key
 
 # Email (Gmail SMTP for OTP)
-EMAIL_ADDRESS=your-email@gmail.com
-EMAIL_PASSWORD=your-app-password
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASS=your-app-password
 
 # Optional: University-level API keys (auto provider fallback)
 # OPENAI_API_KEY=sk-...

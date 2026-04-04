@@ -29,6 +29,7 @@ from app.query_router import (
     Domain,
 )
 from app.vector_store import search_documents
+from app.golden_examples import get_relevant_golden_examples, format_golden_examples_for_prompt
 
 
 # ── Multi-hop result aggregation ──────────────────────────────────────
@@ -215,6 +216,14 @@ def agent_node(state: AgentState) -> AgentState:
             "context when it already answers the question.\n"
         )
 
+    # ── Golden examples context (best-effort) ───────────────────
+    golden_prompt_block = ""
+    if latest_query:
+        golden_examples = get_relevant_golden_examples(latest_query, limit=3)
+        if golden_examples:
+            print(f"Injecting {len(golden_examples)} golden example(s) into prompt")
+            golden_prompt_block = "\n\n" + format_golden_examples_for_prompt(golden_examples) + "\n"
+
     # Check if model supports tools
     if llm_provider.supports_tools():
         print("Using LLM with tool support")
@@ -235,6 +244,7 @@ def agent_node(state: AgentState) -> AgentState:
 
 {routing_context}
 {multi_hop_prompt_block}
+    {golden_prompt_block}
 HOW TO RESPOND:
 1. For ANY question, ALWAYS use the appropriate tool first to search the university knowledge base
 2. If the tools return relevant information, answer BASED ON that information and CITE THE SOURCE (see citation rules below)
@@ -305,6 +315,9 @@ Answer to the best of your knowledge about university-related topics including:
 - General educational topics
 
 Be friendly, informative, and professional. If you don't know something specific to this university, say so honestly.""")
+
+        if golden_prompt_block:
+            system_message = SystemMessage(content=system_message.content + "\n\n" + golden_prompt_block)
         
         messages = [system_message] + list(state["messages"])
         response = llm.invoke(messages)

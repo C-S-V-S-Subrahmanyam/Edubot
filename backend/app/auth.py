@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 
 from app.config import JWT_SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRY, ADMIN_EMAIL_DOMAIN
 from app.db.models import User
@@ -65,6 +66,27 @@ def decode_access_token(token: str) -> dict:
         )
 
 
+def has_permission(current_user: dict, permission: str) -> bool:
+    """Return True if user has the permission (admins always pass)."""
+    if current_user.get("is_admin"):
+        return True
+    user_perms = current_user.get("permissions") or []
+    return permission in user_perms
+
+
+def require_permission(permission: str):
+    """FastAPI dependency factory for permission checks."""
+    async def _checker(current_user: dict = Depends(get_current_user)) -> dict:
+        if not has_permission(current_user, permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission required: {permission}",
+            )
+        return current_user
+
+    return _checker
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     session: AsyncSession = Depends(get_session),
@@ -92,11 +114,20 @@ async def get_current_user(
             detail="Invalid user ID format",
         )
     
-    # Fetch user from database
-    result = await session.execute(
-        select(User).where(User.id == user_id, User.is_active == True)
-    )
-    user = result.scalar_one_or_none()
+    # Fetch user from database with one retry for transient connection drops.
+    user = None
+    for attempt in range(2):
+        try:
+            result = await session.execute(
+                select(User).where(User.id == user_id, User.is_active == True)
+            )
+            user = result.scalar_one_or_none()
+            break
+        except DBAPIError as e:
+            await session.rollback()
+            if attempt == 0 and getattr(e, "connection_invalidated", False):
+                continue
+            raise
     
     if user is None:
         raise HTTPException(
@@ -109,6 +140,7 @@ async def get_current_user(
         "username": user.username,
         "email": user.email,
         "is_admin": user.is_admin,
+        "permissions": user.permissions or [],
     }
 
 

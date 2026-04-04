@@ -8,10 +8,13 @@ import UploadSection from './components/UploadSection';
 import ModelSection from './components/ModelSection';
 import KnowledgeBase from './components/KnowledgeBase';
 import WebScraper from './components/WebScraper';
+import FeedbackSection from './components/FeedbackSection';
+import IntegrationsSection from './components/IntegrationsSection';
+import AccessSection from './components/AccessSection';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
 
-type TabType = 'upload' | 'kb' | 'model' | 'scraper';
+type TabType = 'upload' | 'kb' | 'model' | 'scraper' | 'feedback' | 'integrations' | 'access';
 
 interface ProviderSettings {
   ai_provider: string;
@@ -29,6 +32,9 @@ interface Settings {
 export default function SettingsPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const canManageFeedback = !!user && (user.is_admin || (user.permissions || []).includes('feedback.manage'));
+  const canManageIntegrations = !!user && (user.is_admin || (user.permissions || []).includes('integration.manage'));
+  const canManageAccess = !!user && user.is_admin;
   
   // Check if user has upload access (not @pvpsit.ac.in)
   const hasUploadAccess = user ? !user.email.endsWith('@pvpsit.ac.in') : true;
@@ -44,7 +50,7 @@ export default function SettingsPage() {
   const [providerDefaults, setProviderDefaults] = useState<Record<string, boolean>>({});
   
   const [formData, setFormData] = useState({
-    ai_provider: 'ollama',
+    ai_provider: 'auto',
   });
   
   const [apiKeys, setApiKeys] = useState({
@@ -288,6 +294,36 @@ export default function SettingsPage() {
             <span className={styles.tabIcon}>🤖</span>
             AI Model
           </button>
+          {canManageFeedback && (
+            <button
+              type="button"
+              className={`${styles.tabButton} ${activeTab === 'feedback' ? styles.tabButtonActive : ''}`}
+              onClick={() => setActiveTab('feedback')}
+            >
+              <span className={styles.tabIcon}>📊</span>
+              Feedback
+            </button>
+          )}
+          {canManageIntegrations && (
+            <button
+              type="button"
+              className={`${styles.tabButton} ${activeTab === 'integrations' ? styles.tabButtonActive : ''}`}
+              onClick={() => setActiveTab('integrations')}
+            >
+              <span className={styles.tabIcon}>🔌</span>
+              Integrations
+            </button>
+          )}
+          {canManageAccess && (
+            <button
+              type="button"
+              className={`${styles.tabButton} ${activeTab === 'access' ? styles.tabButtonActive : ''}`}
+              onClick={() => setActiveTab('access')}
+            >
+              <span className={styles.tabIcon}>🔐</span>
+              Access
+            </button>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className={styles.form}>
@@ -304,6 +340,9 @@ export default function SettingsPage() {
                 providerDefaults={providerDefaults}
               />
             )}
+            {activeTab === 'feedback' && canManageFeedback && <FeedbackSection />}
+            {activeTab === 'integrations' && canManageIntegrations && <IntegrationsSection />}
+            {activeTab === 'access' && canManageAccess && <AccessSection />}
           </div>
 
           {/* Last Updated Info - Only show on model tab */}

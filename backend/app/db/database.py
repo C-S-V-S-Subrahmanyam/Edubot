@@ -14,6 +14,12 @@ if os.getenv("DATABASE_SSL", "true").lower() != "false":
     ssl_context = ssl.create_default_context()
     connect_args["ssl"] = ssl_context
 
+# Cloud poolers (for example Neon pooler) can terminate prepared statements
+# and long-idle sockets. Disable statement cache and add TCP keepalive.
+connect_args["statement_cache_size"] = int(os.getenv("DB_STATEMENT_CACHE_SIZE", "0"))
+connect_args["command_timeout"] = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))
+connect_args["server_settings"] = {"application_name": os.getenv("DB_APP_NAME", "edubot")}
+
 # PostgreSQL async engine with connection pooling
 engine = create_async_engine(
     clean_url,
@@ -21,7 +27,9 @@ engine = create_async_engine(
     pool_pre_ping=True,
     pool_size=10,
     max_overflow=20,
-    pool_recycle=3600,  # Recycle connections after 1 hour
+    # Recycle aggressively to reduce stale pool connections on cloud DBs.
+    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "300")),
+    pool_use_lifo=True,
     connect_args=connect_args,
 )
 
@@ -68,6 +76,10 @@ async def _migrate_columns(conn):
         (
             "documents", "is_expired",
             "ALTER TABLE documents ADD COLUMN is_expired BOOLEAN NOT NULL DEFAULT FALSE"
+        ),
+        (
+            "users", "permissions",
+            "ALTER TABLE users ADD COLUMN permissions TEXT[] NOT NULL DEFAULT '{}'"
         ),
     ]
     from sqlalchemy import text

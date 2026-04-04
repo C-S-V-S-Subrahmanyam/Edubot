@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Boolean, Integer
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Boolean, Integer, JSON
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from app.db.database import Base
@@ -16,6 +16,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
+    permissions = Column(ARRAY(String), nullable=False, default=[])
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
@@ -62,12 +63,49 @@ class Message(Base):
         return f"<Message {self.id}>"
 
 
+class MessageFeedback(Base):
+    """User feedback for bot responses."""
+    __tablename__ = "message_feedback"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey("chats.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    feedback_type = Column(String(20), nullable=False)  # positive | negative
+    reason = Column(Text, nullable=True)
+    user_message = Column(Text, nullable=False)
+    bot_message = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f"<MessageFeedback {self.id} {self.feedback_type}>"
+
+
+class GoldenExample(Base):
+    """Admin-curated ideal responses derived from feedback."""
+    __tablename__ = "golden_examples"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    feedback_id = Column(UUID(as_uuid=True), ForeignKey("message_feedback.id", ondelete="SET NULL"), nullable=True)
+    source_type = Column(String(20), nullable=False, default="manual")  # positive | negative | manual
+    original_query = Column(Text, nullable=False)
+    original_response = Column(Text, nullable=False)
+    golden_response = Column(Text, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f"<GoldenExample {self.id} {self.source_type}>"
+
+
 class Setting(Base):
     """Application settings model."""
     __tablename__ = "settings"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    ai_provider = Column(String(50), default="ollama")  # openai, gemini, ollama, auto
+    ai_provider = Column(String(50), default="auto")  # openai, gemini, ollama, deepseek, auto
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
@@ -155,3 +193,23 @@ class OTPToken(Base):
 
     def __repr__(self):
         return f"<OTPToken {self.email} [{self.purpose}]>"
+
+
+class Integration(Base):
+    """External integration configuration record."""
+    __tablename__ = "integrations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    service_name = Column(String(100), nullable=False, index=True)
+    auth_type = Column(String(50), nullable=False, default="api_key")
+    config = Column(JSON, nullable=False, default={})
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_sync_status = Column(String(30), nullable=True)
+    last_sync_error = Column(Text, nullable=True)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f"<Integration {self.service_name} active={self.is_active}>"

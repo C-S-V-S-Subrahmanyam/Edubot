@@ -58,14 +58,15 @@ RESTRICTED_EMAIL_DOMAIN = os.getenv("RESTRICTED_EMAIL_DOMAIN", "@pvpsit.ac.in")
 ADMIN_EMAIL_DOMAIN = os.getenv("ADMIN_EMAIL_DOMAIN", "@pvpsiddhartha.ac.in")
 
 # Default AI Provider & API Keys (university-level defaults from .env)
-DEFAULT_AI_PROVIDER = os.getenv("DEFAULT_AI_PROVIDER", "auto")
+# Backward compatibility: also honor AI_PROVIDER if DEFAULT_AI_PROVIDER is not set.
+DEFAULT_AI_PROVIDER = os.getenv("DEFAULT_AI_PROVIDER") or os.getenv("AI_PROVIDER", "auto")
 DEFAULT_OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
 DEFAULT_GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "")
 DEFAULT_DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEFAULT_DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "")
-DEFAULT_OLLAMA_URL = os.getenv("OLLAMA_URL", "")
+DEFAULT_OLLAMA_URL = os.getenv("OLLAMA_URL") or os.getenv("OLLAMA_BASE_URL", "")
 DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
 
 # Qdrant Vector Database
