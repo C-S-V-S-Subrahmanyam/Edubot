@@ -12,6 +12,8 @@ This module creates the LangGraph workflow where:
 
 from typing import Annotated, Sequence, TypedDict, Optional, Literal
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack
+import atexit
 
 from langchain_core.messages import BaseMessage, SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, END
@@ -30,6 +32,10 @@ from app.query_router import (
 )
 from app.vector_store import search_documents
 from app.golden_examples import get_relevant_golden_examples, format_golden_examples_for_prompt
+
+
+_checkpointer_exit_stack = ExitStack()
+atexit.register(_checkpointer_exit_stack.close)
 
 
 # ── Multi-hop result aggregation ──────────────────────────────────────
@@ -355,18 +361,34 @@ IMPORTANT: Always search the knowledge base first. Do NOT answer from memory or 
         try:
             response = llm_with_tools.invoke(messages)
         except Exception as e:
-            # Handle quota/rate limit errors gracefully by falling back to Ollama
+            # Handle quota/rate limit errors by trying the next tool-capable provider.
             error_str = str(e).lower()
             if any(keyword in error_str for keyword in ["quota", "rate_limit", "429", "insufficient_quota"]):
-                print(f"⚠ Primary provider quota exhausted, re-initializing with Ollama...")
+                print("⚠ Primary provider quota exhausted, trying fallback providers...")
                 original_provider = llm_provider.get_current_provider()
-                try:
-                    llm_provider.set_provider("ollama")
-                    fallback_llm = get_current_llm().bind_tools(domain_tools)
-                    response = fallback_llm.invoke(messages)
-                    print(f"✓ Fallback to Ollama succeeded")
-                except Exception as fallback_error:
-                    print(f"✗ Fallback also failed: {fallback_error}")
+                fallback_order = ["gemini", "deepseek", "ollama"]
+
+                response = None
+                for fallback_provider in fallback_order:
+                    if fallback_provider == original_provider:
+                        continue
+                    if fallback_provider == "ollama" and not llm_provider.supports_tools_for("ollama"):
+                        print("- Skipping Ollama fallback because the configured model does not support tools")
+                        continue
+                    if not available_providers.get(fallback_provider, False):
+                        print(f"- Skipping {fallback_provider} fallback because it is not available")
+                        continue
+
+                    try:
+                        print(f"- Trying fallback provider: {fallback_provider}")
+                        fallback_llm = llm_provider.get_llm(provider=fallback_provider).bind_tools(domain_tools)
+                        response = fallback_llm.invoke(messages)
+                        print(f"✓ Fallback to {fallback_provider} succeeded")
+                        break
+                    except Exception as fallback_error:
+                        print(f"✗ Fallback {fallback_provider} failed: {fallback_error}")
+
+                if response is None:
                     print(f"Restoring original provider: {original_provider}")
                     llm_provider.set_provider(original_provider)
                     return {"messages": [AIMessage(content=NO_BACKEND_DATA_MESSAGE)]}
@@ -426,9 +448,16 @@ def create_agent_graph():
     
     # Initialize PostgreSQL checkpointer for persistent conversation memory
     try:
-        checkpointer = PostgresSaver.from_conn_string(DATABASE_URL_SYNC)
-        checkpointer.setup()  # Creates checkpoint tables if they don't exist
-        print("PostgreSQL checkpointer initialized - conversation history will persist across restarts")
+        checkpointer_cm = PostgresSaver.from_conn_string(DATABASE_URL_SYNC)
+        checkpointer = _checkpointer_exit_stack.enter_context(checkpointer_cm)
+        # Current PostgresSaver implementation in this environment does not implement
+        # async checkpoint methods required by astream/ainvoke paths.
+        if checkpointer.__class__.aget_tuple.__qualname__.startswith("BaseCheckpointSaver"):
+            print("PostgreSQL checkpointer is sync-only; disabling for async chat paths")
+            checkpointer = None
+        else:
+            checkpointer.setup()  # Creates checkpoint tables if they don't exist
+            print("PostgreSQL checkpointer initialized - conversation history will persist across restarts")
     except Exception as e:
         print(f"Warning: Could not initialize PostgreSQL checkpointer: {e}")
         print("Falling back to no checkpointer - conversation history will not persist")

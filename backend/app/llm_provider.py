@@ -158,9 +158,16 @@ class LLMProvider:
         model = self._api_keys.get('gemini_model') or 'gemini-2.5-flash'
         
         # Validate supported models
-        supported_models = ['gemini-2.5-flash', 'gemini-flash-latest']
+        supported_models = [
+            'gemini-2.5-flash',
+            'gemini-flash-latest',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-latest',
+        ]
         if model not in supported_models:
-            raise ValueError(f"Model '{model}' is not supported. Please use Gemini 2.5 Flash or Gemini Flash Latest for optimal performance.")
+            raise ValueError(
+                f"Model '{model}' is not supported. Please use Gemini 1.5 Flash, Gemini 2.5 Flash, or Gemini Flash Latest for optimal performance."
+            )
         
         return ChatGoogleGenerativeAI(
             model=model,
@@ -268,37 +275,34 @@ class LLMProvider:
         """Get the currently active provider."""
         return self.current_provider
     
-    def supports_tools(self) -> bool:
-        """Check if the current model supports tool/function calling."""
-        provider = self.current_provider.lower()
-        
-        if provider in ("openai", "gemini", "deepseek"):
-            print(f"[TOOL SUPPORT] Provider '{provider}' supports tools: YES")
+    def supports_tools_for(self, provider: Optional[str] = None) -> bool:
+        """Check whether a specific provider can use tool/function calling."""
+        provider_name = (provider or self.current_provider).lower()
+
+        if provider_name in ("openai", "gemini", "deepseek"):
+            print(f"[TOOL SUPPORT] Provider '{provider_name}' supports tools: YES")
             return True
-        elif provider == "ollama":
-            # Some Ollama models don't support tools
+
+        if provider_name == "ollama":
+            # Some Ollama models don't support tools.
             model = self._api_keys.get('ollama_model') or os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
             model_lower = model.lower()
-            # Known models without tool support
             non_tool_models = ['gemma', 'phi', 'tinyllama', 'stablelm']
             supports = not any(nm in model_lower for nm in non_tool_models)
             print(f"[TOOL SUPPORT] Ollama model '{model}' supports tools: {supports}")
             return supports
-        elif provider == "auto":
-            # Resolve the actual provider that would be selected and check its tool support
+
+        if provider_name == "auto":
             resolved_provider = self._resolve_auto_provider()
             print(f"[TOOL SUPPORT] Auto-resolved to provider: '{resolved_provider}'")
-            if resolved_provider == "ollama":
-                model = self._api_keys.get('ollama_model') or os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
-                model_lower = model.lower()
-                non_tool_models = ['gemma', 'phi', 'tinyllama', 'stablelm']
-                supports = not any(nm in model_lower for nm in non_tool_models)
-                print(f"[TOOL SUPPORT] Ollama model '{model}' supports tools: {supports}")
-                return supports
-            print(f"[TOOL SUPPORT] Auto-resolved to '{resolved_provider}' which supports tools: YES")
-            return True  # OpenAI, Gemini, DeepSeek support tools
-        print(f"[TOOL SUPPORT] Unknown provider '{provider}': NO")
+            return self.supports_tools_for(resolved_provider)
+
+        print(f"[TOOL SUPPORT] Unknown provider '{provider_name}': NO")
         return False
+
+    def supports_tools(self) -> bool:
+        """Check if the current model supports tool/function calling."""
+        return self.supports_tools_for(self.current_provider)
     
     def _resolve_auto_provider(self) -> str:
         """Determine which provider auto-select would pick without creating an LLM."""

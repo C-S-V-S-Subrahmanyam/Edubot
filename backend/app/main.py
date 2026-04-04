@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 
 from app.config import CORS_ORIGINS, DEBUG
 from app.db.database import init_db, AsyncSessionLocal, engine
-from app.db.models import Document
+from app.db.models import Document, User
 from app.routers import auth_router, chat_router, settings_router, feedback_router, integrations_router
+from app.learning_intelligence import learning_intelligence
 
 from sqlalchemy import select, text
 
@@ -94,6 +95,46 @@ async def _startup_seed_and_sync():
         print(f"⚠️ Expiry flag refresh failed (non-fatal): {e}")
 
 
+async def _bootstrap_admin_user() -> None:
+    """Ensure the known bootstrap admin user has admin privileges."""
+    print("👤 Ensuring bootstrap admin access...")
+    try:
+        from app.config import ADMIN_OVERRIDE_USERNAMES
+
+        if not ADMIN_OVERRIDE_USERNAMES:
+            print("ℹ️ No admin override usernames configured")
+            return
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(User))
+            users = result.scalars().all()
+
+            updated = 0
+            for user in users:
+                uname = (user.username or "").strip().lower()
+                email_prefix = (user.email or "").split("@")[0].lower() if user.email else ""
+                if uname in ADMIN_OVERRIDE_USERNAMES or email_prefix in ADMIN_OVERRIDE_USERNAMES:
+                    changed = False
+                    if not user.is_admin:
+                        user.is_admin = True
+                        changed = True
+                    perms = set(user.permissions or [])
+                    required = {"feedback.manage", "integration.manage"}
+                    if not required.issubset(perms):
+                        user.permissions = sorted(perms.union(required))
+                        changed = True
+                    if changed:
+                        updated += 1
+
+            if updated:
+                await session.commit()
+                print(f"✅ Bootstrap admin updated for {updated} user(s)")
+            else:
+                print("✅ Bootstrap admin check complete (no changes needed)")
+    except Exception as e:
+        print(f"⚠️ Bootstrap admin update failed (non-fatal): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
@@ -103,6 +144,18 @@ async def lifespan(app: FastAPI):
     print("✅ Database initialized")
 
     await _startup_seed_and_sync()
+    await _bootstrap_admin_user()
+
+    print("🧠 Initializing sentiment + recommendation models...")
+    try:
+        learning_intelligence.initialize()
+        metrics = learning_intelligence.get_metrics()
+        print(
+            "✅ Learning models ready "
+            f"(sentiment_accuracy={metrics.get('sentiment_accuracy')}, topics={metrics.get('topic_count')})"
+        )
+    except Exception as e:
+        print(f"⚠️ Learning model initialization failed (non-fatal): {e}")
 
     print("🤖 LangGraph Agent ready")
     print("💬 Multi-model chatbot system active")

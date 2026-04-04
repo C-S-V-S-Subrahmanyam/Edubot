@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 
-from app.config import JWT_SECRET_KEY, JWT_ALGORITHM, JWT_EXPIRY, ADMIN_EMAIL_DOMAIN
+from app.config import (
+    JWT_SECRET_KEY,
+    JWT_ALGORITHM,
+    JWT_EXPIRY,
+    ADMIN_EMAIL_DOMAIN,
+    ADMIN_OVERRIDE_USERNAMES,
+)
 from app.db.models import User
 from app.db.database import get_session
 
@@ -158,12 +164,16 @@ async def get_current_admin_user(
             detail="Admin privileges required",
         )
     
-    # Verify the email domain
+    # Verify the email domain or explicit username override
     email = current_user.get("email", "")
-    if not email.endswith(ADMIN_EMAIL_DOMAIN):
+    username = str(current_user.get("username", "")).lower()
+    if not email.endswith(ADMIN_EMAIL_DOMAIN) and username not in ADMIN_OVERRIDE_USERNAMES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Admin access is restricted to {ADMIN_EMAIL_DOMAIN} domain only",
+            detail=(
+                f"Admin access is restricted to {ADMIN_EMAIL_DOMAIN} domain "
+                f"or approved admin usernames"
+            ),
         )
     
     return current_user

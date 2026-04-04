@@ -56,6 +56,12 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 RESTRICTED_EMAIL_DOMAIN = os.getenv("RESTRICTED_EMAIL_DOMAIN", "@pvpsit.ac.in")
 # Admin email domain — users with this domain are auto-granted admin
 ADMIN_EMAIL_DOMAIN = os.getenv("ADMIN_EMAIL_DOMAIN", "@pvpsiddhartha.ac.in")
+# Comma-separated usernames that should be allowed admin access regardless of email domain.
+ADMIN_OVERRIDE_USERNAMES = [
+    u.strip().lower()
+    for u in os.getenv("ADMIN_OVERRIDE_USERNAMES", "azeez").split(",")
+    if u.strip()
+]
 
 # Default AI Provider & API Keys (university-level defaults from .env)
 # Backward compatibility: also honor AI_PROVIDER if DEFAULT_AI_PROVIDER is not set.

@@ -1,0 +1,29 @@
+Category,Topic,Description
+Data Structures,Binary Trees,Tree nodes structure and traversals including preorder inorder and postorder
+Data Structures,Binary Search Trees,Insertion deletion and searching operations in BST
+Data Structures,Tree Traversals,Depth First Search and Breadth First Search traversal strategies
+Data Structures,Linked Lists,Singly doubly and circular linked list structures and operations
+Data Structures,Stacks and Queues,LIFO and FIFO structures and their applications
+
+Algorithms,Design and Analysis of Algorithms,Time and space complexity sorting searching and greedy techniques
+Algorithms,Dynamic Programming,Overlapping subproblems optimal substructure and memoization
+Algorithms,Recursion,Base case definition and recursive problem decomposition
+
+Graph Theory,Graphs,Basic graph representation terminology and types of graphs
+Graph Theory,Graph Traversal,BFS DFS and shortest path fundamentals
+
+Computer Systems,Operating Systems,Process scheduling memory management and file systems
+Computer Systems,Computer Networks,OSI model TCP IP protocols and routing mechanisms
+
+Programming Languages,Python Programming,Functions object oriented programming and modules in Python
+Programming Languages,C Programming,Pointers arrays structures and memory management
+Programming Languages,Java Programming,Classes inheritance interfaces and exception handling
+
+Databases,DBMS,Normalization transactions indexing and SQL queries
+
+Artificial Intelligence,Data Science Basics,Data preprocessing data cleaning and visualization techniques
+Artificial Intelligence,Machine Learning Basics,Supervised learning algorithms model training and evaluation
+
+Mathematics for CS,Probability and Statistics,Probability distributions hypothesis testing and statistical inference
+
+Software Engineering,Compiler Design,Lexical analysis parsing syntax trees and code generation

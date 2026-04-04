@@ -323,10 +323,19 @@ class FeedbackStatsResponse(BaseModel):
     positive_feedback: int
     negative_feedback: int
     pending_feedback: int
+    in_review_feedback: int = 0
+    resolved_feedback: int = 0
+    dismissed_feedback: int = 0
 
 
 class FeedbackStatusUpdate(BaseModel):
-    status: str = Field(..., pattern="^(pending|reviewed|dismissed)$")
+    status: str = Field(..., pattern="^(pending|triaged|in_review|actioned|resolved|reviewed|dismissed)$")
+
+
+class FeedbackTaxonomyResponse(BaseModel):
+    reasons: Dict[str, List[str]]
+    statuses: List[str]
+    transitions: Dict[str, List[str]]
 
 
 class GoldenExampleCreate(BaseModel):

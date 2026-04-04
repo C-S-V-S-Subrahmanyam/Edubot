@@ -1,0 +1,32 @@
+EduBot ML Dataset Sources
+=========================
+
+Place all downloaded files in:
+backend/data/ml/
+
+1) Sentiment dataset (recommended):
+- Name: TweetEval - Sentiment
+- URL: https://huggingface.co/datasets/tweet_eval
+- Download hint:
+  - Install: pip install datasets
+  - Python:
+      from datasets import load_dataset
+      ds = load_dataset("tweet_eval", "sentiment")
+
+2) Emotion dataset (optional for better emotion signals):
+- Name: GoEmotions
+- URL: https://huggingface.co/datasets/google-research-datasets/go_emotions
+- Download hint:
+  - Install: pip install datasets
+  - Python:
+      from datasets import load_dataset
+      ds = load_dataset("google-research-datasets/go_emotions")
+
+3) Topic recommendation corpus (build manually for your syllabus):
+- Use backend/data/ml/topic_catalog.csv
+- Keep columns: topic,description
+- Add department-specific topics for your curriculum
+
+Current files expected by backend service:
+- backend/data/ml/sentiment_dataset.csv
+- backend/data/ml/topic_catalog.csv

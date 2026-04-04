@@ -10,6 +10,7 @@ from app.schemas import (
     FeedbackResponse,
     FeedbackStatsResponse,
     FeedbackStatusUpdate,
+    FeedbackTaxonomyResponse,
     GoldenExampleCreate,
     GoldenExampleResponse,
     GoldenExampleUpdate,
@@ -17,6 +18,48 @@ from app.schemas import (
 from app.auth import get_current_user, require_permission
 
 router = APIRouter(prefix="/feedback", tags=["Feedback"])
+
+FEEDBACK_REASON_CATALOG = {
+    "positive": [
+        "Accurate answer",
+        "Clear explanation",
+        "Helpful step-by-step guidance",
+        "Good recommendation",
+        "Fast response",
+    ],
+    "negative": [
+        "Incorrect information",
+        "Answer too generic",
+        "Missing important details",
+        "Not grounded in backend data",
+        "Hard to understand",
+        "Irrelevant recommendation",
+    ],
+}
+
+FEEDBACK_WORKFLOW_TRANSITIONS = {
+    "pending": ["triaged", "dismissed"],
+    "triaged": ["in_review", "dismissed"],
+    "in_review": ["actioned", "dismissed"],
+    "actioned": ["resolved", "in_review"],
+    "resolved": ["resolved"],
+    "reviewed": ["reviewed"],  # backward compatibility with existing rows
+    "dismissed": ["dismissed"],
+}
+
+
+def _normalize_reason(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    cleaned = reason.strip()
+    return cleaned or None
+
+
+def _is_valid_reason(feedback_type: str, reason: str | None) -> bool:
+    if not reason:
+        return True
+    allowed = FEEDBACK_REASON_CATALOG.get(feedback_type, [])
+    return reason in allowed or reason.lower().startswith("other:")
 
 
 @router.post("/", response_model=FeedbackResponse, status_code=status.HTTP_201_CREATED)
@@ -36,11 +79,18 @@ async def create_feedback(
                 detail="Invalid chat_id format",
             ) from e
 
+    normalized_reason = _normalize_reason(payload.reason)
+    if not _is_valid_reason(payload.feedback_type, normalized_reason):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid feedback reason. Use catalog values or prefix custom reason with 'Other:'.",
+        )
+
     feedback = MessageFeedback(
         chat_id=chat_id,
         user_id=uuid.UUID(current_user["user_id"]),
         feedback_type=payload.feedback_type,
-        reason=payload.reason,
+        reason=normalized_reason,
         user_message=payload.user_message,
         bot_message=payload.bot_message,
         status="pending",
@@ -49,6 +99,19 @@ async def create_feedback(
     await session.commit()
     await session.refresh(feedback)
     return FeedbackResponse.model_validate(feedback)
+
+
+@router.get("/taxonomy", response_model=FeedbackTaxonomyResponse)
+async def get_feedback_taxonomy(
+    current_user: dict = Depends(get_current_user),
+):
+    """Provide reason catalog and workflow statuses for frontend feedback UI."""
+    statuses = list(FEEDBACK_WORKFLOW_TRANSITIONS.keys())
+    return FeedbackTaxonomyResponse(
+        reasons=FEEDBACK_REASON_CATALOG,
+        statuses=statuses,
+        transitions=FEEDBACK_WORKFLOW_TRANSITIONS,
+    )
 
 
 @router.get("/stats", response_model=FeedbackStatsResponse)
@@ -64,12 +127,18 @@ async def get_feedback_stats(
     positive = sum(1 for r in rows if r.feedback_type == "positive")
     negative = sum(1 for r in rows if r.feedback_type == "negative")
     pending = sum(1 for r in rows if r.status == "pending")
+    in_review = sum(1 for r in rows if r.status in {"triaged", "in_review", "actioned"})
+    resolved = sum(1 for r in rows if r.status in {"resolved", "reviewed"})
+    dismissed = sum(1 for r in rows if r.status == "dismissed")
 
     return FeedbackStatsResponse(
         total_feedback=total,
         positive_feedback=positive,
         negative_feedback=negative,
         pending_feedback=pending,
+        in_review_feedback=in_review,
+        resolved_feedback=resolved,
+        dismissed_feedback=dismissed,
     )
 
 
@@ -119,6 +188,17 @@ async def update_feedback_status(
     feedback = result.scalar_one_or_none()
     if feedback is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found")
+
+    current_status = feedback.status or "pending"
+    allowed_next = FEEDBACK_WORKFLOW_TRANSITIONS.get(current_status, [])
+    if payload.status not in allowed_next:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid status transition from '{current_status}' to '{payload.status}'. "
+                f"Allowed: {allowed_next}"
+            ),
+        )
 
     feedback.status = payload.status
     await session.commit()

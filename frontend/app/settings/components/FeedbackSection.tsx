@@ -19,11 +19,31 @@ type FeedbackStats = {
   positive_feedback: number;
   negative_feedback: number;
   pending_feedback: number;
+  in_review_feedback: number;
+  resolved_feedback: number;
+  dismissed_feedback: number;
+};
+
+type FeedbackTaxonomy = {
+  reasons: Record<'positive' | 'negative', string[]>;
+  statuses: string[];
+  transitions: Record<string, string[]>;
+};
+
+const statusLabel: Record<string, string> = {
+  pending: 'Pending',
+  triaged: 'Triaged',
+  in_review: 'In Review',
+  actioned: 'Actioned',
+  resolved: 'Resolved',
+  reviewed: 'Reviewed',
+  dismissed: 'Dismissed',
 };
 
 export default function FeedbackSection() {
   const [stats, setStats] = useState<FeedbackStats | null>(null);
   const [items, setItems] = useState<FeedbackItem[]>([]);
+  const [taxonomy, setTaxonomy] = useState<FeedbackTaxonomy | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [goldenItems, setGoldenItems] = useState<Array<{
@@ -40,14 +60,16 @@ export default function FeedbackSection() {
       setLoading(true);
       setError('');
       try {
-        const [statsData, listData, goldenData] = await Promise.all([
+        const [statsData, listData, goldenData, taxonomyData] = await Promise.all([
           apiClient.getFeedbackStats(),
           apiClient.getFeedbackList(20, 0),
           apiClient.getGoldenExamples(10, 0),
+          apiClient.getFeedbackTaxonomy(),
         ]);
         setStats(statsData);
         setItems(listData);
         setGoldenItems(goldenData);
+        setTaxonomy(taxonomyData);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         setError(message);
@@ -67,7 +89,7 @@ export default function FeedbackSection() {
     return <div className={styles.error}>Failed to load feedback data: {error}</div>;
   }
 
-  const handleStatus = async (id: string, status: 'reviewed' | 'dismissed') => {
+  const handleStatus = async (id: string, status: 'pending' | 'triaged' | 'in_review' | 'actioned' | 'resolved' | 'reviewed' | 'dismissed') => {
     try {
       await apiClient.updateFeedbackStatus(id, status);
       setItems((prev) => prev.map((item) => (item.id === id ? { ...item, status } : item)));
@@ -118,11 +140,11 @@ export default function FeedbackSection() {
     <div className={styles.sectionContent}>
       <div className={styles.sectionIntro}>
         <h3>Feedback Dashboard</h3>
-        <p>Review user feedback on assistant responses.</p>
+        <p>Track workflow progress, reasons, and convert high-quality fixes into golden responses.</p>
       </div>
 
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 12 }}>
           <div className={styles.uploadedFilesList}>
             <h4>Total</h4>
             <p>{stats.total_feedback}</p>
@@ -139,6 +161,30 @@ export default function FeedbackSection() {
             <h4>Pending</h4>
             <p>{stats.pending_feedback}</p>
           </div>
+          <div className={styles.uploadedFilesList}>
+            <h4>In Review</h4>
+            <p>{stats.in_review_feedback}</p>
+          </div>
+          <div className={styles.uploadedFilesList}>
+            <h4>Resolved</h4>
+            <p>{stats.resolved_feedback}</p>
+          </div>
+          <div className={styles.uploadedFilesList}>
+            <h4>Dismissed</h4>
+            <p>{stats.dismissed_feedback}</p>
+          </div>
+        </div>
+      )}
+
+      {taxonomy && (
+        <div className={styles.uploadedFilesList}>
+          <h4>Reason Catalog</h4>
+          <p className={styles.uploadHint}>
+            Positive: {taxonomy.reasons.positive.join(' | ')}
+          </p>
+          <p className={styles.uploadHint}>
+            Negative: {taxonomy.reasons.negative.join(' | ')}
+          </p>
         </div>
       )}
 
@@ -157,16 +203,20 @@ export default function FeedbackSection() {
                     </p>
                     <p className={styles.fileSize}>Q: {item.user_message.slice(0, 120)}</p>
                     <p className={styles.fileSize}>A: {item.bot_message.slice(0, 160)}</p>
-                    <p className={styles.fileSize}>Status: {item.status}</p>
+                    <p className={styles.fileSize}>Status: {statusLabel[item.status] || item.status}</p>
                     {item.reason ? <p className={styles.fileSize}>Reason: {item.reason}</p> : null}
-                    {item.status === 'pending' ? (
+                    {taxonomy ? (
                       <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                        <button type="button" className={styles.uploadButton} onClick={() => handleStatus(item.id, 'reviewed')}>
-                          Approve
-                        </button>
-                        <button type="button" className={styles.removeButton} onClick={() => handleStatus(item.id, 'dismissed')}>
-                          Dismiss
-                        </button>
+                        {(taxonomy.transitions[item.status] || []).map((nextStatus) => (
+                          <button
+                            key={nextStatus}
+                            type="button"
+                            className={nextStatus === 'dismissed' ? styles.removeButton : styles.uploadButton}
+                            onClick={() => handleStatus(item.id, nextStatus as 'pending' | 'triaged' | 'in_review' | 'actioned' | 'resolved' | 'reviewed' | 'dismissed')}
+                          >
+                            Move to {statusLabel[nextStatus] || nextStatus}
+                          </button>
+                        ))}
                         <button type="button" className={styles.backButton} onClick={() => handleCreateGolden(item)}>
                           Create Golden
                         </button>

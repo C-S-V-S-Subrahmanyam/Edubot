@@ -263,6 +263,14 @@ class ApiClient {
     });
   }
 
+  async getMlMetrics(): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('/chat/ml/metrics');
+  }
+
+  async getMlDatasetSources(): Promise<{ download_and_keep_in: string; sources: Array<Record<string, string>> }> {
+    return this.request<{ download_and_keep_in: string; sources: Array<Record<string, string>> }>('/chat/ml/dataset-sources');
+  }
+
   async submitFeedback(data: {
     chat_id?: string | null;
     feedback_type: 'positive' | 'negative';
@@ -281,8 +289,19 @@ class ApiClient {
     positive_feedback: number;
     negative_feedback: number;
     pending_feedback: number;
+    in_review_feedback: number;
+    resolved_feedback: number;
+    dismissed_feedback: number;
   }> {
     return this.request('/feedback/stats');
+  }
+
+  async getFeedbackTaxonomy(): Promise<{
+    reasons: Record<'positive' | 'negative', string[]>;
+    statuses: string[];
+    transitions: Record<string, string[]>;
+  }> {
+    return this.request('/feedback/taxonomy');
   }
 
   async getFeedbackList(limit = 50, offset = 0): Promise<Array<{
@@ -299,7 +318,7 @@ class ApiClient {
 
   async updateFeedbackStatus(
     feedbackId: string,
-    status: 'pending' | 'reviewed' | 'dismissed',
+    status: 'pending' | 'triaged' | 'in_review' | 'actioned' | 'resolved' | 'reviewed' | 'dismissed',
   ): Promise<{ id: string; status: string }> {
     return this.request(`/feedback/${feedbackId}/status`, {
       method: 'PATCH',
