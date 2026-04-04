@@ -196,21 +196,6 @@ If needed, set API URL:
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api
 ```
 
----
-
-## Admin Access (Azeez)
-
-This project now supports username-based admin override.
-
-- Config: `ADMIN_OVERRIDE_USERNAMES=azeez`
-- Startup bootstrap ensures matching users are admin and have:
-  - `feedback.manage`
-  - `integration.manage`
-
-Additionally, Azeez has been updated in DB in this environment.
-
----
-
 ## Feedback Reasons and Workflow
 
 ### Reason catalog
@@ -269,15 +254,11 @@ and handles common encodings (`utf-8`, `utf-8-sig`, `cp1252`, `latin-1`).
 
 ### Public dataset download links
 
-1. TweetEval Sentiment
-- https://huggingface.co/datasets/tweet_eval
+1. Sentiment Analysis Dataset
+- https://www.kaggle.com/datasets/abhi8923shriv/sentiment-analysis-dataset
 - Keep mapped file at: `backend/data/ml/sentiment_dataset.csv`
 
-2. GoEmotions
-- https://huggingface.co/datasets/google-research-datasets/go_emotions
-- Map to positive/negative/neutral and keep at: `backend/data/ml/sentiment_dataset.csv`
-
-3. Topic source reference
+2. Topic source reference
 - https://en.wikipedia.org/wiki/List_of_computer_science_topics
 - Curate syllabus topics into: `backend/data/ml/topic_catalog.csv`
 
