@@ -273,21 +273,31 @@ class LLMProvider:
         provider = self.current_provider.lower()
         
         if provider in ("openai", "gemini", "deepseek"):
+            print(f"[TOOL SUPPORT] Provider '{provider}' supports tools: YES")
             return True
         elif provider == "ollama":
             # Some Ollama models don't support tools
-            model = self._api_keys.get('ollama_model', '').lower()
+            model = self._api_keys.get('ollama_model') or os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
+            model_lower = model.lower()
             # Known models without tool support
             non_tool_models = ['gemma', 'phi', 'tinyllama', 'stablelm']
-            return not any(nm in model for nm in non_tool_models)
+            supports = not any(nm in model_lower for nm in non_tool_models)
+            print(f"[TOOL SUPPORT] Ollama model '{model}' supports tools: {supports}")
+            return supports
         elif provider == "auto":
             # Resolve the actual provider that would be selected and check its tool support
             resolved_provider = self._resolve_auto_provider()
+            print(f"[TOOL SUPPORT] Auto-resolved to provider: '{resolved_provider}'")
             if resolved_provider == "ollama":
-                model = self._api_keys.get('ollama_model', '').lower()
+                model = self._api_keys.get('ollama_model') or os.getenv('OLLAMA_MODEL', 'llama3.1:8b')
+                model_lower = model.lower()
                 non_tool_models = ['gemma', 'phi', 'tinyllama', 'stablelm']
-                return not any(nm in model for nm in non_tool_models)
-            return True  # OpenAI and Gemini support tools
+                supports = not any(nm in model_lower for nm in non_tool_models)
+                print(f"[TOOL SUPPORT] Ollama model '{model}' supports tools: {supports}")
+                return supports
+            print(f"[TOOL SUPPORT] Auto-resolved to '{resolved_provider}' which supports tools: YES")
+            return True  # OpenAI, Gemini, DeepSeek support tools
+        print(f"[TOOL SUPPORT] Unknown provider '{provider}': NO")
         return False
     
     def _resolve_auto_provider(self) -> str:
