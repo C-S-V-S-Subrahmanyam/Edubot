@@ -399,6 +399,36 @@ class ApiClient {
     });
   }
 
+  async runIntegrationSync(integrationId: string): Promise<{
+    success: boolean;
+    log: {
+      id: string;
+      status: string;
+      http_status?: number;
+      message?: string;
+      started_at: string;
+      finished_at?: string;
+    };
+  }> {
+    return this.request(`/integrations/${integrationId}/sync`, {
+      method: 'POST',
+    });
+  }
+
+  async getIntegrationSyncHistory(integrationId: string, limit = 20, offset = 0): Promise<Array<{
+    id: string;
+    integration_id: string;
+    status: string;
+    http_status?: number;
+    message?: string;
+    started_at: string;
+    finished_at?: string;
+    triggered_by?: string;
+    created_at: string;
+  }>> {
+    return this.request(`/integrations/${integrationId}/sync-history?limit=${limit}&offset=${offset}`);
+  }
+
   async getPermissionCatalog(): Promise<{ permissions: string[] }> {
     return this.request('/settings/permissions/catalog');
   }

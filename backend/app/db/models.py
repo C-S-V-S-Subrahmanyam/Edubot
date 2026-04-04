@@ -213,3 +213,21 @@ class Integration(Base):
 
     def __repr__(self):
         return f"<Integration {self.service_name} active={self.is_active}>"
+
+
+class IntegrationSyncLog(Base):
+    """Sync execution log for integrations."""
+    __tablename__ = "integration_sync_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    integration_id = Column(UUID(as_uuid=True), ForeignKey("integrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="running")  # running | success | failed
+    http_status = Column(Integer, nullable=True)
+    message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    triggered_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f"<IntegrationSyncLog {self.id} {self.status}>"

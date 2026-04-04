@@ -403,6 +403,33 @@ class IntegrationTestRequest(BaseModel):
     base_url: str = Field(..., min_length=8)
 
 
+class IntegrationSyncLogResponse(BaseModel):
+    id: str
+    integration_id: str
+    status: str
+    http_status: Optional[int] = None
+    message: Optional[str] = None
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    triggered_by: Optional[str] = None
+    created_at: datetime
+
+    @field_validator('id', 'integration_id', 'triggered_by', mode='before')
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, UUID):
+            return str(v)
+        return v
+
+    class Config:
+        from_attributes = True
+
+
+class IntegrationSyncRunResponse(BaseModel):
+    success: bool
+    log: IntegrationSyncLogResponse
+
+
 class UserPermissionResponse(BaseModel):
     id: str
     email: str
